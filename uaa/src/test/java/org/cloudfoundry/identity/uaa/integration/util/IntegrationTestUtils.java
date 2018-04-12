@@ -286,6 +286,43 @@ public class IntegrationTestUtils {
         return client;
     }
 
+    public static ScimUser createOrUpdateUser(RestTemplate client,
+                                      String url,
+                                      String zoneSubdomain,
+                                      String username,
+                                      String firstName,
+                                      String lastName,
+                                      String email,
+                                      boolean verified) {
+        return createOrUpdateUserWithPhone(client, url, zoneSubdomain, username, firstName, lastName, email, verified, null);
+    }
+    public static ScimUser createOrUpdateUserWithPhone(RestTemplate client,
+                                                       String url,
+                                                       String zoneSubdomain,
+                                                       String username,
+                                                       String firstName,
+                                                       String lastName,
+                                                       String email,
+                                                       boolean verified,
+                                                       String phoneNumber) {
+
+        ScimUser user = new ScimUser();
+        user.setUserName(username);
+        user.setName(new ScimUser.Name(firstName, lastName));
+        user.addEmail(email);
+        user.setVerified(verified);
+        user.setActive(true);
+        user.setPassword("secr3T");
+        user.setPhoneNumbers(Collections.singletonList(new PhoneNumber(phoneNumber)));
+
+        MultiValueMap<String, String> headers = new LinkedMultiValueMap<String, String>() {{
+            add(IdentityZoneSwitchingFilter.SUBDOMAIN_HEADER, zoneSubdomain);
+        }};
+        HttpEntity<ScimUser> request = new HttpEntity<ScimUser>(user, headers);
+
+        return client.postForEntity(url+"/Users", request, ScimUser.class).getBody();
+    }
+
     public static ScimUser createUser(RestTemplate client,
                                       String url,
                                       String username,

@@ -18,6 +18,7 @@ import org.cloudfoundry.identity.uaa.account.UserInfoResponse;
 import org.cloudfoundry.identity.uaa.constants.OriginKeys;
 import org.cloudfoundry.identity.uaa.integration.util.IntegrationTestUtils;
 import org.cloudfoundry.identity.uaa.integration.util.SamlIdentityProviderCreator;
+import org.cloudfoundry.identity.uaa.integration.util.SamlIntegrationTestUtils;
 import org.cloudfoundry.identity.uaa.integration.util.ScreenshotOnFail;
 import org.cloudfoundry.identity.uaa.integration.util.SimpleSamlPhpIdpCreator;
 import org.cloudfoundry.identity.uaa.mock.util.MockMvcUtils;
@@ -29,12 +30,14 @@ import org.cloudfoundry.identity.uaa.provider.LockoutPolicy;
 import org.cloudfoundry.identity.uaa.provider.PasswordPolicy;
 import org.cloudfoundry.identity.uaa.provider.SamlIdentityProviderDefinition;
 import org.cloudfoundry.identity.uaa.provider.UaaIdentityProviderDefinition;
+import org.cloudfoundry.identity.uaa.provider.saml.idp.SamlServiceProvider;
 import org.cloudfoundry.identity.uaa.provider.saml.idp.SamlTestUtils;
 import org.cloudfoundry.identity.uaa.scim.ScimGroup;
 import org.cloudfoundry.identity.uaa.scim.ScimGroupExternalMember;
 import org.cloudfoundry.identity.uaa.scim.ScimUser;
 import org.cloudfoundry.identity.uaa.test.UaaTestAccounts;
 import org.cloudfoundry.identity.uaa.util.JsonUtils;
+import org.cloudfoundry.identity.uaa.util.TestUaaUrlBuilder;
 import org.cloudfoundry.identity.uaa.zone.IdentityZone;
 import org.cloudfoundry.identity.uaa.zone.IdentityZoneConfiguration;
 import org.flywaydb.core.internal.util.StringUtils;
@@ -85,7 +88,6 @@ import java.util.stream.Collectors;
 import static org.cloudfoundry.identity.uaa.authentication.AbstractClientParametersAuthenticationFilter.CLIENT_SECRET;
 import static org.cloudfoundry.identity.uaa.integration.util.IntegrationTestUtils.createSimplePHPSamlIDP;
 import static org.cloudfoundry.identity.uaa.integration.util.IntegrationTestUtils.doesSupportZoneDNS;
-import static org.cloudfoundry.identity.uaa.integration.util.IntegrationTestUtils.getZoneAdminToken;
 import static org.cloudfoundry.identity.uaa.integration.util.IntegrationTestUtils.isMember;
 import static org.cloudfoundry.identity.uaa.oauth.token.ClaimConstants.USER_ATTRIBUTES;
 import static org.cloudfoundry.identity.uaa.oauth.token.TokenConstants.GRANT_TYPE_SAML2_BEARER;
@@ -115,14 +117,21 @@ public class SamlLoginIT {
     @Autowired @Rule
     public IntegrationTestRule integrationTestRule;
 
-    @Rule
-    public RetryRule retryRule = new RetryRule(3);
+//    @Rule
+//    public RetryRule retryRule = new RetryRule(3);
 
     @Rule
     public ScreenshotOnFail screenShootRule = new ScreenshotOnFail();
 
+    // TODO: replace with restTemplate
+//    @Autowired
+//    RestOperations restOperations;
+
     @Autowired
-    RestOperations restOperations;
+    RestTemplate restTemplate;
+
+    @Autowired
+    RestTemplate adminRestTemplate;
 
     @Autowired
     WebDriver webDriver;
@@ -138,6 +147,9 @@ public class SamlLoginIT {
 
     ServerRunning serverRunning = ServerRunning.isRunning();
     private static SamlTestUtils samlTestUtils;
+    private static SamlIntegrationTestUtils samlIntegrationTestUtils;
+
+    private TestUaaUrlBuilder testUaaUrlBuilder = new TestUaaUrlBuilder();
 
     private static SamlIdentityProviderCreator idpCreator;
 
@@ -152,6 +164,8 @@ public class SamlLoginIT {
         }
         idpCreator = new SimpleSamlPhpIdpCreator(SAML_ORIGIN, ServerRunning.isRunning());
     }
+
+    @BeforeClass
 
     public static String getValidRandomIDPMetaData() {
         return String.format(MockMvcUtils.IDP_META_DATA, new RandomValueStringGenerator().generate());
@@ -168,12 +182,30 @@ public class SamlLoginIT {
         webDriver.get("http://simplesamlphp2.cfapps.io/module.php/core/authenticate.php?as=example-userpass&logout");
     }
 
+    // TODO: remove
+    @Test
+    @Ignore
+    public void testOurTestUtilsWorksForTestingSamlTests() throws Exception {
+//        String idpMetadata = SamlIntegrationTestUtils.getIdpMetadata(restTemplate, baseUrl, null);
+//        System.out.println(idpMetadata);
+        RestTemplate adminClient = IntegrationTestUtils.getClientCredentialsTemplate(
+            IntegrationTestUtils.getClientCredentialsResource(baseUrl, new String[0], "admin", "adminsecret"));
+
+        IdentityZone identityZone =
+            IntegrationTestUtils.createZoneOrUpdateSubdomain(adminClient, baseUrl, "uaa-saml-sp-zone", "uaa-saml-sp-zone");
+
+        SamlServiceProvider serviceProvider =
+            SamlIntegrationTestUtils.createServiceProvider(
+                "uaa-saml-sp-test", "uaa-saml-sp-entityId", restTemplate, baseUrl, null, "uaa-saml-sp-zone");
+        System.out.println(serviceProvider);
+    }
+
     @Test
     public void testContentTypes() throws Exception {
         String loginUrl = baseUrl + "/login";
         HttpHeaders jsonHeaders = new HttpHeaders();
         jsonHeaders.add("Accept", "application/json");
-        ResponseEntity<Map> jsonResponseEntity = restOperations.exchange(loginUrl,
+        ResponseEntity<Map> jsonResponseEntity = restTemplate.exchange(loginUrl,
             HttpMethod.GET,
             new HttpEntity<>(jsonHeaders),
             Map.class);
@@ -181,7 +213,7 @@ public class SamlLoginIT {
 
         HttpHeaders htmlHeaders = new HttpHeaders();
         htmlHeaders.add("Accept", "text/html");
-        ResponseEntity<Void> htmlResponseEntity = restOperations.exchange(loginUrl,
+        ResponseEntity<Void> htmlResponseEntity = restTemplate.exchange(loginUrl,
             HttpMethod.GET,
             new HttpEntity<>(htmlHeaders),
             Void.class);
@@ -189,7 +221,7 @@ public class SamlLoginIT {
 
         HttpHeaders defaultHeaders = new HttpHeaders();
         defaultHeaders.add("Accept", "*/*");
-        ResponseEntity<Void> defaultResponseEntity = restOperations.exchange(loginUrl,
+        ResponseEntity<Void> defaultResponseEntity = restTemplate.exchange(loginUrl,
             HttpMethod.GET,
             new HttpEntity<>(defaultHeaders),
             Void.class);
@@ -198,7 +230,15 @@ public class SamlLoginIT {
 
     @Test
     public void testSimpleSamlPhpPasscodeRedirect() throws Exception {
-        testSimpleSamlLogin("/passcode", "Temporary Authentication Code");
+        IdentityZone identityZone =
+            IntegrationTestUtils.createZoneOrUpdateSubdomain(adminRestTemplate, baseUrl, "uaa-saml-idp-zone", "uaa-saml-idp-zone");
+        // TODO: get rid of this nasty HTTP(S) protocol logic
+        // TODO: getting 401 below
+        IntegrationTestUtils.createOrUpdateUser(
+            adminRestTemplate, baseUrl, identityZone.getSubdomain(), "marissa", "marissa", "koala", "marissa@test.org", true);
+//            adminRestTemplate, baseUrl, identityZone.getSubdomain(), testAccounts.getUserName(), "firstName", "lastName", testAccounts.getEmail(), true);
+
+        testSamlLogin("/passcode", "Temporary Authentication Code", identityZone.getSubdomain(), "", "marissa", "secr3T");
     }
 
     @Test
@@ -437,7 +477,37 @@ public class SamlLoginIT {
         testSimpleSamlLogin("/login", "Where to?", "marissa4", "saml2");
     }
 
+    private void testSamlLogin(String firstUrl, String lookFor, String metadataZone, String idpZone) throws Exception {
+        testSamlLogin(firstUrl, lookFor, metadataZone, idpZone, testAccounts.getUserName(), testAccounts.getPassword());
+    }
 
+    private void testSamlLogin(String firstUrl,
+                               String lookFor,
+                               String idpZone,
+                               String spZone,
+                               String username,
+                               String password) throws Exception {
+
+        // TODO: parametrize identity provider name?
+        IdentityProvider<SamlIdentityProviderDefinition> provider =
+            SamlIntegrationTestUtils.createUaaSamlIdentityProvider("uaa-saml-idp", baseUrl, idpZone, spZone);
+        SamlIntegrationTestUtils.createServiceProvider("uaa-saml-sp-test", null, adminRestTemplate, baseUrl, spZone, idpZone);
+
+        webDriver.get(baseUrl + firstUrl);
+        Assert.assertEquals("Cloud Foundry", webDriver.getTitle());
+        webDriver.findElement(By.xpath("//a[text()='" + provider.getConfig().getLinkText() + "']")).click();
+        //takeScreenShot();
+        Assert.assertEquals("Cloud Foundry", webDriver.getTitle());
+        webDriver.findElement(By.xpath("//h1[contains(text(), " + idpZone));
+        webDriver.findElement(By.name("username")).clear();
+        webDriver.findElement(By.name("username")).sendKeys(username);
+        webDriver.findElement(By.name("password")).sendKeys(password);
+        webDriver.findElement(By.xpath("//input[@value='Login']")).click();
+        assertThat(webDriver.findElement(By.cssSelector("h1")).getText(), Matchers.containsString(lookFor));
+        IntegrationTestUtils.validateAccountChooserCookie(baseUrl, webDriver);
+    }
+
+        // TODO: remove
     private void testSimpleSamlLogin(String firstUrl, String lookfor) throws Exception {
         testSimpleSamlLogin(firstUrl, lookfor, testAccounts.getUserName(), testAccounts.getPassword());
     }
@@ -1443,7 +1513,7 @@ public class SamlLoginIT {
     public SamlIdentityProviderDefinition getTestURLDefinition() {
         SamlIdentityProviderDefinition def = new SamlIdentityProviderDefinition();
         def.setZoneId("uaa");
-        def.setMetaDataLocation("https://branding.login.oms.identity.team/saml/metadata?random="+new RandomValueStringGenerator().generate());
+        def.setMetaDataLocation("https://branding.login." + testUaaUrlBuilder.getSystemDomain() + "/saml/metadata?random="+new RandomValueStringGenerator().generate());
         //def.setMetaDataLocation("https://login.run.pivotal.io/saml/metadata");
         def.setNameID("urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress");
         def.setAssertionConsumerIndex(0);

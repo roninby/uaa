@@ -17,6 +17,7 @@ import org.apache.commons.lang.StringUtils;
 import org.cloudfoundry.identity.uaa.ServerRunning;
 import org.cloudfoundry.identity.uaa.constants.OriginKeys;
 import org.cloudfoundry.identity.uaa.integration.util.IntegrationTestUtils;
+import org.cloudfoundry.identity.uaa.integration.util.SimpleSamlPhpIdpCreator;
 import org.cloudfoundry.identity.uaa.oauth.token.CompositeAccessToken;
 import org.cloudfoundry.identity.uaa.oauth.token.TokenConstants;
 import org.cloudfoundry.identity.uaa.provider.IdentityProvider;
@@ -494,7 +495,7 @@ public class SamlLoginWithLocalIdpIT {
         );
 
         SamlIdentityProviderDefinition samlIdentityProviderDefinition = createZone1IdpDefinition("cloudfoundry-saml-login");
-        getSamlIdentityProvider(zoneId2,
+        getSamlIdentityProviderNew(zoneId2,
                                 adminToken,
                                 samlIdentityProviderDefinition);
 
@@ -750,6 +751,20 @@ public class SamlLoginWithLocalIdpIT {
         idp = IntegrationTestUtils.createOrUpdateProvider(spZoneAdminToken, baseUrl, idp);
         assertNotNull(idp.getId());
         return idp;
+    }
+
+    private IdentityProvider<SamlIdentityProviderDefinition> getSamlIdentityProviderNew(String spZoneId, String spZoneAdminToken, SamlIdentityProviderDefinition samlIdentityProviderDefinition) {
+//        IdentityProvider<SamlIdentityProviderDefinition> idp = new IdentityProvider<>();
+//        idp.setIdentityZoneId(spZoneId);
+//        idp.setType(OriginKeys.SAML);
+//        idp.setActive(true);
+//        idp.setConfig(samlIdentityProviderDefinition);
+//        idp.setOriginKey(samlIdentityProviderDefinition.getIdpEntityAlias());
+//        idp.setName("Local SAML IdP for testzone1");
+//        idp = IntegrationTestUtils.createOrUpdateProvider(spZoneAdminToken, baseUrl, idp);
+//        assertNotNull(idp.getId());
+//        return idp;
+        return new SimpleSamlPhpIdpCreator("simplesamlphp", ServerRunning.isRunning()).createIdp(baseUrl);
     }
 
     @Test
